@@ -420,45 +420,65 @@ with tabs[2]:
         st.warning("Coluna MALDI-TOF não encontrada; análise de espécies omitida.")
 
 # ---------------------------
-# Rodapé (ajuda/guia de filtros)
+# Rodapé (guia único)
 # ---------------------------
 st.divider()
-with st.expander("Ajuda: filtros e controles da barra lateral", expanded=False):
+with st.expander("Guia rápido: uso, regras e cálculos", expanded=False):
         st.markdown(
                 """
-                - Fonte dos dados
-                    - Arquivo padrão (Cepas.xlsx): Usa automaticamente o arquivo local "Cepas.xlsx" (se existir na pasta do app).
-                    - Upload de arquivo: Permite enviar outro .xlsx para análise.
+                • Como usar (barra lateral)
+                - Passo 1 — Fonte dos dados
+                    - Arquivo padrão (Cepas.xlsx): usa automaticamente o arquivo local se existir na pasta do app.
+                    - Upload de .xlsx: envie outro arquivo para análise.
+                - Passo 2 — Cabeçalho e leitura
+                    - Linha do cabeçalho: 2 por padrão (porque a 1ª linha costuma ser título/legenda). Ajuste se a sua planilha tiver o cabeçalho em outra linha.
+                - Passo 3 — Particionamento temporal
+                    - Limite p/ 2025: separa os grupos a partir do número extraído de `CÓDIGO UFPB` após “MA”. Ex.: `MA180` ⇒ 180. Valores `>= limite` entram em “2025 / atual”; os demais, em “Anos anteriores”.
+                - Passo 4 — Antibióticos e cobertura
+                    - Antibióticos: selecione as colunas a considerar (somente as existentes na planilha aparecem).
+                    - N mínimo testado: oculta antibióticos com menos de N resultados válidos.
+                    - Cobertura mínima %: oculta antibióticos pouco testados no grupo (`N/Total`).
+                - Passo 5 — Gráficos por antibiótico
+                    - Top N por %R: define quantos antibióticos aparecem no gráfico horizontal de Top Resistência (%R).
+                    - Ordenar gráfico empilhado por: ordena as barras por `%R`, `%S`, `%Cobertura` ou por nome.
+                    - Rótulos das barras (empilhado): ative se quiser mostrar valores dentro das barras; ajuste limiar de exibição, casas decimais, tamanho e direção do texto.
+                    - Forçar gráficos interativos (Plotly): liga/desliga versão interativa (útil para zoom e hover; desative se estiver pesado no navegador).
+                - Passo 6 — Espécies (MALDI-TOF)
+                    - Tipo de gráfico: “Barra” (horizontal) ou “Pizza”.
+                    - Top N espécies: limita às mais frequentes.
+                    - Agrupar demais em “Outros”: soma as demais espécies em um único item.
+                - Dicas rápidas
+                    - Se algum antibiótico “sumir”, verifique se os filtros de N mínimo/Cobertura mínima não estão altos demais.
+                    - Se o Arquivo padrão não existir, use Upload.
+                    - Use “Baixar CSV” para auditar e conferir casos específicos.
 
-                - Leitura e partição dos dados
-                    - Linha do cabeçalho: Número da linha do cabeçalho na planilha (1 = primeira linha). Padrão: 2.
-                    - Limite numérico p/ 2025: Separa os grupos usando o número extraído do campo "CÓDIGO UFPB" (ex.: MA 180 ⇒ 180). Registros com valor >= limite vão para "2025 / atual"; os demais, para "Anos anteriores".
+                • Como os dados são lidos
+                - Normalização dos nomes de colunas (trim e troca de `–` por `-`).
+                - Colunas‑chave: `CÓDIGO UFPB` (exato após normalização) e `MALDI-TOF` (aceita variações contendo “MALDI”).
+                - Antibióticos considerados (usa apenas os que existem na planilha):
+                    GEN, TOB, AMI, ATM, CRO, CAZ, CTX, CFO, CPM, AMC, AMP, PPT, CZA, MER, IMP, CIP, LEV, SUT, POLI B.
 
-                - Seleção e filtros (métricas por antibiótico)
-                    - Top N por %R (gráfico horizontal): Define quantos antibióticos exibir no gráfico de Top Resistência.
-                    - Ordenar gráfico empilhado por: Critério de ordenação do gráfico empilhado (por %R, %S, %Cobertura ou nome do antibiótico).
-                    - N mínimo testado (filtro): Mostra apenas antibióticos com pelo menos N testes válidos.
-                    - Cobertura mínima %: Mostra apenas antibióticos com cobertura (N/Total) maior ou igual ao valor indicado.
-                    - Antibióticos (na seção lateral "Antibióticos"): Permite escolher quais colunas de antibióticos serão consideradas.
+                • Regras e cálculos
+                - `_NUM`: extraído de `CÓDIGO UFPB` com `MA(\d+)` (ex.: `MA24B`, `MA180`).
+                - Particionamento: `_NUM >= 180` ⇒ “2025 / atual”; `_NUM < 180` ⇒ “Anos anteriores”.
+                - Resultado por célula: pega o primeiro rótulo válido em `{SSD, R, S, I}`; aceita variações (`SSD/I`, `SSD–`, `R *`, `S (ok)`), e `INTERMEDIARIO/INTERMEDIÁRIO` vira `I`. Ignora vazio, `*`, `-`, `NaN`.
+                - Para cada antibiótico: `N`, contagens `R/S/I/SSD`, `%R`, `%S`, `%I+SSD` (base `N`), `Total`, `%Cobertura = 100*N/Total`, `Sem Resultado = Total - N`.
+                - Ordenação da tabela: `%R` (desc), depois `%Cobertura` (desc) e nome.
 
-                - Visualização
-                    - Forçar gráficos interativos (Plotly): Usa gráficos interativos (quando disponível). Desmarque para usar gráficos estáticos (Matplotlib).
+                • Saídas
+                - Tabela: `Antibiótico | N | Total | %Cobertura | R | S | I | SSD | %R | %S | %I+SSD | Sem Resultado` (percentuais com 1 casa decimal) + botão “Baixar CSV”.
+                - Gráficos: Top %R (horizontal) e gráfico empilhado de `%S`, `%I+SSD`, `%R` com rótulos opcionais.
+                - Espécies (MALDI-TOF): remove `""` e `*`; mostra barras horizontais (ou pizza) com Top N e “Outros”.
 
-                - Rótulos das barras (empilhado)
-                    - Exibir rótulos internos (vertical): Ativa/desativa completamente os rótulos dentro das barras do gráfico empilhado.
-                    - Mostrar rótulo a partir de (%): Só exibe rótulos para segmentos com percentual acima do limiar informado.
-                    - Casas decimais: Define quantas casas decimais aparecem no rótulo.
-                    - Tamanho do texto: Ajusta o tamanho da fonte dos rótulos.
-                    - Direção do rótulo vertical: "Baixo -> cima" (texto sobe) ou "Cima -> baixo" (texto desce).
+                • Salvaguardas
+                - Não eliminamos testes válidos: qualquer célula que contenha `SSD|R|S|I` é contada uma vez.
+                - Diferenças de `N` refletem a cobertura real (células vazias/asteriscos não contam).
+                - Conferência: exporte o CSV e verifique casos específicos (ex.: `GEN` em `>=180`).
 
-                - Espécies (MALDI-TOF)
-                    - Tipo de gráfico: "Barra" ou "Pizza" para visualizar a distribuição das espécies.
-                    - Top N espécies: Limita a lista exibida aos N mais frequentes.
-                    - Agrupar demais em 'Outros': Soma as espécies fora do Top N em uma categoria "Outros".
-
-                - Dicas
-                    - Se os rótulos ficarem ilegíveis em segmentos muito pequenos, aumente o limiar de exibição, o tamanho do gráfico ou desative os rótulos.
-                    - Use a cobertura mínima e o N mínimo para focar nos antibióticos mais testados.
-                    - Se o arquivo padrão não for encontrado, selecione "Upload de arquivo" para enviar um .xlsx.
+                • Fórmulas
+                - `%R = 100 * R / N`
+                - `%S = 100 * S / N`
+                - `%I+SSD = 100 * (I + SSD) / N`
+                - `%Cobertura = 100 * N / Total`
                 """
         )
