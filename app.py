@@ -205,6 +205,218 @@ def to_csv_download(df):
     buffer.seek(0)
     return buffer
 
+def analise_por_especie(grp_df, titulo, col_maldi, sel_abx, min_n_especie=5):
+    """Analisa suscetibilidade por espécie dentro de um grupo temporal"""
+    st.subheader(f"Análise por Espécie - {titulo}")
+    
+    if col_maldi not in grp_df.columns:
+        st.warning("Coluna MALDI-TOF não encontrada.")
+        return
+    
+    # Filtrar espécies válidas
+    df_especie = grp_df[grp_df[col_maldi].notna() & 
+                       (grp_df[col_maldi].astype(str).str.strip() != "") & 
+                       (grp_df[col_maldi].astype(str).str.strip() != "*")].copy()
+    
+    if df_especie.empty:
+        st.info("Sem dados válidos de espécies para este grupo.")
+        return
+    
+    # Contar isolados por espécie
+    especies_count = df_especie[col_maldi].value_counts()
+    st.caption(f"Total de isolados com espécie identificada: {len(df_especie)}")
+    
+    # Filtro por número mínimo de isolados por espécie
+    min_n_especie = st.slider(
+        f"Mínimo de isolados por espécie ({titulo})",
+        min_value=1,
+        max_value=50,
+        value=5,
+        key=f"min_especie_{titulo.replace(' ', '_')}",
+        help=(
+            "Padrão = 5. Com N muito baixo, os percentuais oscilam demais: "
+            "1 caso muda 100%, N=3 muda ~33 p.p., N=5 muda 20 p.p., N=10 muda 10 p.p. "
+            "Usar 5 reduz a instabilidade sem ocultar completamente espécies menos frequentes."
+        ),
+    )
+    
+    especies_validas = especies_count[especies_count >= min_n_especie].index.tolist()
+    
+    if not especies_validas:
+        st.warning(f"Nenhuma espécie tem pelo menos {min_n_especie} isolados.")
+        return
+    
+    st.write(f"Espécies com ≥ {min_n_especie} isolados: {len(especies_validas)}")
+    
+    # Criar abas para cada espécie
+    if len(especies_validas) > 8:
+        # Se muitas espécies, usar selectbox
+        especie_selecionada = st.selectbox(
+            f"Selecione uma espécie para análise detalhada ({titulo})", 
+            especies_validas,
+            key=f"select_especie_{titulo.replace(' ', '_')}"
+        )
+        especies_para_mostrar = [especie_selecionada]
+    else:
+        # Se poucas espécies, mostrar todas em abas
+        especies_para_mostrar = especies_validas
+    
+    # Criar visualização por espécie
+    for i, especie in enumerate(especies_para_mostrar):
+        if len(especies_para_mostrar) > 1:
+            st.markdown(f"### {especie}")
+        else:
+            st.markdown(f"### Espécie selecionada: {especie}")
+        
+        df_esp = df_especie[df_especie[col_maldi] == especie].copy()
+        n_isolados = len(df_esp)
+        st.caption(f"Isolados desta espécie: {n_isolados}")
+        
+        if n_isolados == 0:
+            continue
+        
+        # Calcular perfil de resistência para esta espécie
+        rows_esp = perfil_sri_rows(df_esp, sel_abx)
+        df_rows_esp = format_df_numeric(rows_to_df(rows_esp))
+        
+        # Filtrar apenas antibióticos com resultados
+        df_rows_esp = df_rows_esp[df_rows_esp["N"] > 0]
+        
+        if df_rows_esp.empty:
+            st.info("Nenhum resultado de antibiótico para esta espécie.")
+            continue
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            # Tabela de resultados
+            st.dataframe(
+                df_rows_esp.style
+                .background_gradient(subset=["%R"], cmap="Reds")
+                .background_gradient(subset=["%S"], cmap="Greens")
+                .format({"%R": "{:.1f}", "%S": "{:.1f}", "%I+SSD": "{:.1f}", "%Cobertura": "{:.1f}"})
+            , use_container_width=True)
+        
+        with col2:
+            # Download dos dados da espécie
+            st.download_button(
+                label=f"Baixar CSV - {especie}",
+                data=to_csv_download(df_rows_esp),
+                file_name=f"resistencia_{especie.replace(' ', '_')}_{titulo.replace(' ', '_').lower()}.csv",
+                mime="text/csv",
+                key=f"download_{especie}_{titulo.replace(' ', '_')}"
+            )
+        
+        # Gráficos para a espécie
+        col3, col4 = st.columns(2)
+        
+        with col3:
+            st.markdown("#### Top %R por antibiótico")
+            fig1_esp = fig_topR(df_rows_esp.values.tolist(), f"Resistência - {especie}", top=15)
+            if fig1_esp is not None:
+                if HAS_PLOTLY:
+                    st.plotly_chart(fig1_esp, use_container_width=True)
+                else:
+                    st.pyplot(fig1_esp, use_container_width=True)
+        
+        with col4:
+            st.markdown("#### Perfil de suscetibilidade")
+            fig2_esp = fig_stacked(
+                df_rows_esp.values.tolist(), f"Suscetibilidade - {especie}", 
+                ordenar_por="%R", label_threshold=5.0, label_decimals=1,
+                label_fontsize=10, label_vertical=True, 
+                label_vertical_dir="up", show_labels=True
+            )
+            if fig2_esp is not None:
+                if HAS_PLOTLY:
+                    st.plotly_chart(fig2_esp, use_container_width=True)
+                else:
+                    st.pyplot(fig2_esp, use_container_width=True)
+        
+        if len(especies_para_mostrar) > 1:
+            st.divider()
+    
+    # Resumo comparativo entre espécies
+    st.markdown("### Resumo Comparativo entre Espécies")
+    
+    # Criar tabela resumo
+    resumo_data = []
+    for especie in especies_validas:
+        df_esp = df_especie[df_especie[col_maldi] == especie].copy()
+        rows_esp = perfil_sri_rows(df_esp, sel_abx)
+        df_rows_esp = format_df_numeric(rows_to_df(rows_esp))
+        
+        # Calcular médias de resistência
+        if not df_rows_esp.empty and df_rows_esp["N"].sum() > 0:
+            # Resistência média ponderada pelo número de testes
+            resistencia_media = (df_rows_esp["%R"] * df_rows_esp["N"]).sum() / df_rows_esp["N"].sum()
+            sensibilidade_media = (df_rows_esp["%S"] * df_rows_esp["N"]).sum() / df_rows_esp["N"].sum()
+            total_testes = df_rows_esp["N"].sum()
+            total_isolados = len(df_esp)
+        else:
+            resistencia_media = 0
+            sensibilidade_media = 0
+            total_testes = 0
+            total_isolados = len(df_esp)
+        
+        resumo_data.append({
+            "Espécie": especie,
+            "Isolados": total_isolados,
+            "Total de Testes": total_testes,
+            "% Resistência Média": round(resistencia_media, 1),
+            "% Sensibilidade Média": round(sensibilidade_media, 1)
+        })
+    
+    df_resumo = pd.DataFrame(resumo_data)
+    df_resumo = df_resumo.sort_values("% Resistência Média", ascending=False)
+    
+    st.dataframe(
+        df_resumo.style
+        .background_gradient(subset=["% Resistência Média"], cmap="Reds")
+        .background_gradient(subset=["% Sensibilidade Média"], cmap="Greens")
+    , use_container_width=True)
+    
+    # Download do resumo
+    st.download_button(
+        label="Baixar Resumo Comparativo (CSV)",
+        data=to_csv_download(df_resumo),
+        file_name=f"resumo_especies_{titulo.replace(' ', '_').lower()}.csv",
+        mime="text/csv",
+        key=f"download_resumo_{titulo.replace(' ', '_')}"
+    )
+
+    # Nota metodológica da análise por espécie
+    st.divider()
+    with st.expander(f"Nota metodológica — Análise por espécie ({titulo})", expanded=False):
+        st.markdown(
+            """
+            O que é:
+            - Analisa perfis de suscetibilidade (S, I/SSD, R) por antibiótico dentro de cada espécie identificada por MALDI-TOF no grupo selecionado.
+
+            Como foi feito:
+            - Considera apenas registros com espécie válida (não vazia e diferente de "*").
+                        - Aplica um limite mínimo de isolados por espécie (controle no slider) para evitar conclusões com amostras muito pequenas.
+            - Para cada antibiótico na espécie: normaliza o resultado da célula (primeiro rótulo em {SSD, R, S, I}), conta N válidos e calcula %R, %S e %I+SSD sobre N.
+            - Exibe: tabela por antibiótico; Top %R; gráfico empilhado de %S, %I+SSD e %R; e um resumo comparativo entre espécies.
+            - O resumo usa médias ponderadas pelo número de testes (N) para %R e %S de cada antibiótico na espécie.
+
+                        Por que o mínimo padrão é 5 isolados?
+                        - Percentuais com N muito baixo são instáveis (basta 1 amostra alterar muito o resultado):
+                            • N=1 → 0% ou 100%; N=3 → variações em passos de ~33 pontos percentuais (p.p.);
+                            • N=5 → passos de 20 p.p.; N=10 → 10 p.p.
+                        - 5 é um compromisso: reduz a volatilidade sem esconder espécies menos frequentes.
+                        - Ajuste conforme o objetivo: use 3 para exploração inicial de espécies raras; use 10+ quando precisar de resultados mais estáveis/robustos.
+
+            Interpretação e limites:
+            - Cobertura baixa (poucos testes em um antibiótico) pode distorcer percentuais; use os filtros de N mínimo e cobertura.
+            - "I" e "SSD" são combinados no gráfico como I/SSD; as contagens são mostradas separadamente na tabela.
+            - Células com anotações variadas (ex.: "R *", "SSD –") são interpretadas pelo primeiro rótulo válido.
+
+            Fórmulas:
+            - %R = 100 * R / N; %S = 100 * S / N; %I+SSD = 100 * (I + SSD) / N; Cobertura = 100 * N / Total.
+            """
+            )
+
 # ---------------------------
 # UI
 # ---------------------------
@@ -219,7 +431,7 @@ with st.sidebar:
     if data_source == "Upload de arquivo":
         up = st.file_uploader("Carregar Excel (.xlsx)", type=["xlsx"])
     header_row = st.number_input("Linha do cabeçalho (1 = primeira linha)", min_value=1, value=2)
-    codigo_limite = st.number_input("Limite numérico p/ 2025 (ex.: MA >= 180)", min_value=0, value=180)
+    codigo_limite = st.number_input("Limite numérico p/ 2025 (ex.: MA >= 181)", min_value=0, value=181)
     top_n = st.slider("Top N por %R (gráfico horizontal)", 5, 30, 15)
     ordenar_por = st.selectbox("Ordenar gráfico empilhado por", ["%R", "%S", "%Cobertura", "Antibiótico"])
     min_n = st.slider("N mínimo testado (filtro)", 0, 100, 0)
@@ -294,7 +506,7 @@ df["_NUM"] = df[col_codigo].apply(extrai_num_codigo)
 grp_2025 = df[df["_NUM"] >= codigo_limite].copy()
 grp_prev = df[(df["_NUM"] < codigo_limite) & (~df["_NUM"].isna())].copy()
 
-tabs = st.tabs(["2025 / atual", "Anos anteriores", "Espécies (MALDI-TOF)"])
+tabs = st.tabs(["2025 / atual", "Anos anteriores", "Espécies (MALDI-TOF)", "Análise por Espécie - 2025/atual", "Análise por Espécie - Anos anteriores"])
 
 # Helper para uma aba de análise
 def render_tab(grp_df, titulo):
@@ -418,6 +630,12 @@ with tabs[2]:
             st.info("Sem valores válidos em MALDI-TOF.")
     else:
         st.warning("Coluna MALDI-TOF não encontrada; análise de espécies omitida.")
+
+with tabs[3]:
+    analise_por_especie(grp_2025, "2025/atual", col_maldi, sel_abx)
+
+with tabs[4]:
+    analise_por_especie(grp_prev, "Anos anteriores", col_maldi, sel_abx)
 
 # ---------------------------
 # Rodapé (guia único)
